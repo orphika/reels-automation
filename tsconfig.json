@@ -1,15 +1,17 @@
 {
   "compilerOptions": {
-    "target": "ES2022",
-    "lib": ["DOM", "ES2022"],
-    "jsx": "react",
+    "target": "ES2020",
     "module": "commonjs",
-    "moduleResolution": "node",
+    "lib": ["ES2020"],
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "strict": true,
-    "outDir": "./dist",
-    "rootDir": "."
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "jsx": "react"
   },
-  "include": ["remotion/**/*", "src/**/*"]
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "remotion"]
 }
