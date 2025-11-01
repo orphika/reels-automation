@@ -1,6 +1,4 @@
 import { ElevenLabsClient } from '@elevenlabs/elevenlabs-js';
-import * as fs from 'fs';
-import * as path from 'path';
 
 export class ElevenLabsService {
   private client: ElevenLabsClient;
@@ -14,7 +12,6 @@ export class ElevenLabsService {
   async generateSpeech(text: string, voiceId?: string): Promise<string | null> {
     try {
       if (!this.apiKey) {
-        console.log('No API key - skipping audio');
         return null;
       }
 
@@ -24,19 +21,19 @@ export class ElevenLabsService {
       
       const audio = await this.client.textToSpeech.convert(voice, {
         text: text,
-        modelId: "eleven_turbo_v2", // ← Changed model_id to modelId
-        voice_settings: {
+        modelId: "eleven_turbo_v2",
+        voiceSettings: {
           stability: 0.5,
-          similarity_boost: 0.75
+          similarityBoost: 0.75
         }
       });
 
-      const chunks: Uint8Array[] = []; // ← Changed Buffer[] to Uint8Array[]
+      const chunks: Uint8Array[] = [];
       for await (const chunk of audio) {
         chunks.push(chunk);
       }
 
-      const audioBuffer = Buffer.concat(chunks); // Buffer.concat accepte Uint8Array
+      const audioBuffer = Buffer.concat(chunks);
       const audioBase64 = audioBuffer.toString('base64');
       const audioDataUrl = `data:audio/mpeg;base64,${audioBase64}`;
 
@@ -44,8 +41,7 @@ export class ElevenLabsService {
       return audioDataUrl;
       
     } catch (error) {
-      console.error('Error generating speech:', error);
-      console.log('Continuing without audio...');
+      console.error('ElevenLabs error:', error);
       return null;
     }
   }
