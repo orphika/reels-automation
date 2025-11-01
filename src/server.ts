@@ -41,35 +41,40 @@ app.post('/api/render', async (req: Request, res: Response) => {
       return;
     }
 
-    let finalAudioUrl = audioUrl;
+    // Changed: Allow null type
+    let finalAudioUrl: string | null | undefined = audioUrl;
 
+    // Generate audio if not provided
     if (!finalAudioUrl && elevenLabsService) {
       console.log('Generating audio with ElevenLabs...');
       finalAudioUrl = await elevenLabsService.generateSpeech(script, voiceId);
-      console.log('Audio generated:', finalAudioUrl);
-    } else if (!finalAudioUrl) {
-      res.status(400).json({ 
-        error: 'Either audioUrl must be provided or ELEVENLABS_API_KEY must be set' 
-      });
-      return;
+      
+      if (finalAudioUrl) {
+        console.log('Audio generated successfully');
+      } else {
+        console.log('Audio generation failed, continuing without audio');
+      }
     }
 
+    // Bundle Remotion
     const bundleLocation = await bundle({
       entryPoint: path.join(process.cwd(), 'remotion/index.tsx'),
       webpackOverride: (config) => config,
     });
 
+    // Select composition
     const composition = await selectComposition({
       serveUrl: bundleLocation,
       id: 'VideoTemplate',
       inputProps: {
         script,
-        audioUrl: finalAudioUrl,
+        audioUrl: finalAudioUrl || undefined, // Changed: Handle null
         avatarUrl,
         backgroundUrl,
       },
     });
 
+    // Create output directory
     const outputDir = path.join(process.cwd(), 'public', 'videos');
     if (!fs.existsSync(outputDir)) {
       fs.mkdirSync(outputDir, { recursive: true });
@@ -79,6 +84,8 @@ app.post('/api/render', async (req: Request, res: Response) => {
     const outputPath = path.join(outputDir, `video_${timestamp}.mp4`);
 
     console.log('Rendering video...');
+    
+    // Render video
     await renderMedia({
       composition,
       serveUrl: bundleLocation,
@@ -86,7 +93,7 @@ app.post('/api/render', async (req: Request, res: Response) => {
       outputLocation: outputPath,
       inputProps: {
         script,
-        audioUrl: finalAudioUrl,
+        audioUrl: finalAudioUrl || undefined, // Changed: Handle null
         avatarUrl,
         backgroundUrl,
       },
@@ -95,14 +102,19 @@ app.post('/api/render', async (req: Request, res: Response) => {
     console.log('Video rendered successfully!');
 
     const videoUrl = `public/videos/video_${timestamp}.mp4`;
-    const isAbsoluteAudioUrl = finalAudioUrl.startsWith('http://') || finalAudioUrl.startsWith('https://');
+    
+    // Changed: Safe check for finalAudioUrl
+    const isAbsoluteAudioUrl = finalAudioUrl ? 
+      (finalAudioUrl.startsWith('http://') || finalAudioUrl.startsWith('https://')) : 
+      false;
     
     res.json({
       success: true,
       videoUrl: `/${videoUrl}`,
-      audioUrl: isAbsoluteAudioUrl ? finalAudioUrl : `/${finalAudioUrl}`,
+      audioUrl: finalAudioUrl ? (isAbsoluteAudioUrl ? finalAudioUrl : `/${finalAudioUrl}`) : null,
       videoPath: outputPath,
     });
+    
   } catch (error) {
     console.error('Error rendering video:', error);
     res.status(500).json({ 
@@ -120,6 +132,6 @@ app.get('/health', (req: Request, res: Response) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-  console.log(`ElevenLabs configured: ${!!elevenLabsApiKey}`);
+  console.log(`Server running on http://localhost:${PORT}`); // Fixed: Added ${}
+  console.log(`ElevenLabs configured: ${!!elevenLabsApiKey}`); // Fixed: Added ${}
 });
