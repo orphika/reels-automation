@@ -80,8 +80,10 @@ export const VideoTemplate: React.FC<VideoTemplateProps> = ({
         />
       )}
 
-      {/* Audio */}
-      <Audio src={audioUrl} />
+      {/* Audio - Only render if audioUrl is valid */}
+      {audioUrl && audioUrl.length > 0 && (
+        <Audio src={audioUrl} />
+      )}
 
       {/* Avatar Placeholder */}
       <div
