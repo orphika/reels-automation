@@ -2,7 +2,6 @@ import express, { Request, Response } from 'express';
 import cors from 'cors';
 import { bundle } from '@remotion/bundler';
 import { renderMedia, selectComposition } from '@remotion/renderer';
-import { ElevenLabsService } from './elevenlabs-service';
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -14,11 +13,61 @@ app.use(express.json());
 app.use('/public', express.static(path.join(process.cwd(), 'public')));
 
 const elevenLabsApiKey = process.env.ELEVENLABS_API_KEY;
-let elevenLabsService: ElevenLabsService | null = null;
 
-if (elevenLabsApiKey) {
-  elevenLabsService = new ElevenLabsService(elevenLabsApiKey);
+// === NOUVELLE FONCTION AUDIO AVEC FALLBACK ===
+async function generateAudioWithElevenLabs(text: string, voiceId: string = "TxGEqnHWrfWFTfGW9XjX"): Promise<string | null> {
+  try {
+    console.log(`🎵 Generating audio with voice: ${voiceId}`);
+    
+    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+      method: 'POST',
+      headers: {
+        'Accept': 'audio/mpeg',
+        'Content-Type': 'application/json',
+        'xi-api-key': process.env.ELEVENLABS_API_KEY!
+      },
+      body: JSON.stringify({
+        text: text.substring(0, 5000),
+        model_id: "eleven_monolingual_v1",
+        voice_settings: {
+          stability: 0.7,
+          similarity_boost: 0.8
+        }
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`❌ ElevenLabs API error: ${response.status}`, errorText);
+      throw new Error(`ElevenLabs API error: ${response.status}`);
+    }
+
+    const audioBuffer = await response.arrayBuffer();
+    const audioDir = path.join(process.cwd(), 'public', 'audio');
+    if (!fs.existsSync(audioDir)) {
+      fs.mkdirSync(audioDir, { recursive: true });
+    }
+    
+    const audioPath = path.join(audioDir, `audio_${Date.now()}.mp3`);
+    fs.writeFileSync(audioPath, Buffer.from(audioBuffer));
+    
+    console.log(`✅ Audio generated successfully: ${audioPath}`);
+    return audioPath;
+    
+  } catch (error) {
+    console.error('❌ ElevenLabs failed:', error);
+    
+    // Essayer la voix de secours
+    if (voiceId === "TxGEqnHWrfWFTfGW9XjX") {
+      console.log('🔄 Trying backup voice: Bella');
+      return await generateAudioWithElevenLabs(text, "4RZ84U1b4WCqpu57LvIq");
+    } else {
+      console.log('🔇 All voice generation failed, continuing without audio');
+      return null;
+    }
+  }
 }
+// === FIN NOUVELLE FONCTION ===
 
 interface RenderRequest {
   script: string;
@@ -41,40 +90,41 @@ app.post('/api/render', async (req: Request, res: Response) => {
       return;
     }
 
-    // Changed: Allow null type
     let finalAudioUrl: string | null | undefined = audioUrl;
 
-    // Generate audio if not provided
-    if (!finalAudioUrl && elevenLabsService) {
-      console.log('Generating audio with ElevenLabs...');
-      finalAudioUrl = await elevenLabsService.generateSpeech(script, voiceId);
+    // === NOUVELLE LOGIQUE AUDIO ===
+    if (!finalAudioUrl && elevenLabsApiKey) {
+      console.log('🎵 Generating audio with ElevenLabs...');
+      
+      // Utiliser la voix fournie ou Josh par défaut
+      const selectedVoiceId = voiceId || "TxGEqnHWrfWFTfGW9XjX";
+      finalAudioUrl = await generateAudioWithElevenLabs(script, selectedVoiceId);
       
       if (finalAudioUrl) {
-        console.log('Audio generated successfully');
+        console.log('✅ Audio generated successfully');
       } else {
-        console.log('Audio generation failed, continuing without audio');
+        console.log('❌ Audio generation failed, continuing without audio');
       }
     }
+    // === FIN NOUVELLE LOGIQUE ===
 
-    // Bundle Remotion
+    // [Le reste de votre code Remotion reste identique...]
     const bundleLocation = await bundle({
       entryPoint: path.join(process.cwd(), 'remotion/index.tsx'),
       webpackOverride: (config) => config,
     });
 
-    // Select composition
     const composition = await selectComposition({
       serveUrl: bundleLocation,
       id: 'VideoTemplate',
       inputProps: {
         script,
-        audioUrl: finalAudioUrl || undefined, // Changed: Handle null
+        audioUrl: finalAudioUrl || undefined,
         avatarUrl,
         backgroundUrl,
       },
     });
 
-    // Create output directory
     const outputDir = path.join(process.cwd(), 'public', 'videos');
     if (!fs.existsSync(outputDir)) {
       fs.mkdirSync(outputDir, { recursive: true });
@@ -83,9 +133,8 @@ app.post('/api/render', async (req: Request, res: Response) => {
     const timestamp = Date.now();
     const outputPath = path.join(outputDir, `video_${timestamp}.mp4`);
 
-    console.log('Rendering video...');
+    console.log('🎬 Rendering video...');
     
-    // Render video
     await renderMedia({
       composition,
       serveUrl: bundleLocation,
@@ -93,17 +142,16 @@ app.post('/api/render', async (req: Request, res: Response) => {
       outputLocation: outputPath,
       inputProps: {
         script,
-        audioUrl: finalAudioUrl || undefined, // Changed: Handle null
+        audioUrl: finalAudioUrl || undefined,
         avatarUrl,
         backgroundUrl,
       },
     });
 
-    console.log('Video rendered successfully!');
+    console.log('✅ Video rendered successfully!');
 
     const videoUrl = `public/videos/video_${timestamp}.mp4`;
     
-    // Changed: Safe check for finalAudioUrl
     const isAbsoluteAudioUrl = finalAudioUrl ? 
       (finalAudioUrl.startsWith('http://') || finalAudioUrl.startsWith('https://')) : 
       false;
@@ -116,7 +164,7 @@ app.post('/api/render', async (req: Request, res: Response) => {
     });
     
   } catch (error) {
-    console.error('Error rendering video:', error);
+    console.error('❌ Error rendering video:', error);
     res.status(500).json({ 
       error: 'Failed to render video', 
       details: error instanceof Error ? error.message : 'Unknown error'
@@ -132,6 +180,6 @@ app.get('/health', (req: Request, res: Response) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`); // Fixed: Added ${}
-  console.log(`ElevenLabs configured: ${!!elevenLabsApiKey}`); // Fixed: Added ${}
+  console.log(`🚀 Server running on http://localhost:${PORT}`);
+  console.log(`🎵 ElevenLabs configured: ${!!elevenLabsApiKey}`);
 });
