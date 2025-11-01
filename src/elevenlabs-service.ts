@@ -24,19 +24,19 @@ export class ElevenLabsService {
       
       const audio = await this.client.textToSpeech.convert(voice, {
         text: text,
-        model_id: "eleven_turbo_v2",
+        modelId: "eleven_turbo_v2", // ← Changed model_id to modelId
         voice_settings: {
           stability: 0.5,
           similarity_boost: 0.75
         }
       });
 
-      const chunks: Buffer[] = [];
+      const chunks: Uint8Array[] = []; // ← Changed Buffer[] to Uint8Array[]
       for await (const chunk of audio) {
         chunks.push(chunk);
       }
 
-      const audioBuffer = Buffer.concat(chunks);
+      const audioBuffer = Buffer.concat(chunks); // Buffer.concat accepte Uint8Array
       const audioBase64 = audioBuffer.toString('base64');
       const audioDataUrl = `data:audio/mpeg;base64,${audioBase64}`;
 
