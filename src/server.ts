@@ -2,6 +2,7 @@ import express, { Request, Response } from 'express';
 import cors from 'cors';
 import { bundle } from '@remotion/bundler';
 import { renderMedia, selectComposition } from '@remotion/renderer';
+import { google } from 'googleapis';
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -14,7 +15,7 @@ app.use('/public', express.static(path.join(process.cwd(), 'public')));
 
 const elevenLabsApiKey = process.env.ELEVENLABS_API_KEY;
 
-// === NOUVELLE FONCTION AUDIO AVEC FALLBACK ===
+// === FONCTION AUDIO AVEC FALLBACK ===
 async function generateAudioWithElevenLabs(text: string, voiceId: string = "TxGEqnHWrfWFTfGW9XjX"): Promise<string | null> {
   try {
     console.log(`🎵 Generating audio with voice: ${voiceId}`);
@@ -67,8 +68,76 @@ async function generateAudioWithElevenLabs(text: string, voiceId: string = "TxGE
     }
   }
 }
-// === FIN NOUVELLE FONCTION ===
 
+// === FONCTION UPLOAD GOOGLE DRIVE ===
+async function uploadToGoogleDrive(filePath: string, fileName: string): Promise<{ driveLink: string | null; driveId: string | null }> {
+  try {
+    console.log('📤 Uploading to Google Drive...');
+    
+    // Vérifier si les credentials existent
+    if (!process.env.GOOGLE_CREDENTIALS) {
+      console.error('❌ GOOGLE_CREDENTIALS not found in environment variables');
+      return { driveLink: null, driveId: null };
+    }
+
+    // Authentification
+    const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
+    const auth = new google.auth.GoogleAuth({
+      credentials: credentials,
+      scopes: ['https://www.googleapis.com/auth/drive.file'],
+    });
+
+    const drive = google.drive({ version: 'v3', auth });
+
+    // Métadonnées du fichier
+    const fileMetadata = {
+      name: fileName,
+      mimeType: 'video/mp4',
+    };
+
+    // Contenu du fichier
+    const media = {
+      mimeType: 'video/mp4',
+      body: fs.createReadStream(filePath),
+    };
+
+    // Upload
+    const response = await drive.files.create({
+      requestBody: fileMetadata,
+      media: media,
+      fields: 'id, webViewLink, webContentLink',
+    });
+
+    // Rendre le fichier accessible (optionnel)
+    if (response.data.id) {
+      await drive.permissions.create({
+        fileId: response.data.id,
+        requestBody: {
+          role: 'reader',
+          type: 'anyone',
+        },
+      });
+    }
+
+    console.log('✅ Video uploaded to Google Drive!');
+    console.log(`📁 Drive ID: ${response.data.id}`);
+    console.log(`🔗 View Link: ${response.data.webViewLink}`);
+
+    return {
+      driveLink: response.data.webViewLink || null,
+      driveId: response.data.id || null
+    };
+    
+  } catch (error) {
+    console.error('❌ Google Drive upload failed:', error);
+    if (error instanceof Error) {
+      console.error('Error details:', error.message);
+    }
+    return { driveLink: null, driveId: null };
+  }
+}
+
+// === INTERFACE REQUEST ===
 interface RenderRequest {
   script: string;
   voiceId?: string;
@@ -81,6 +150,7 @@ interface RenderRequest {
   };
 }
 
+// === ENDPOINT PRINCIPAL ===
 app.post('/api/render', async (req: Request, res: Response) => {
   try {
     const { script, voiceId, avatarUrl, backgroundUrl, audioUrl, style }: RenderRequest = req.body;
@@ -92,11 +162,10 @@ app.post('/api/render', async (req: Request, res: Response) => {
 
     let finalAudioUrl: string | null | undefined = audioUrl;
 
-    // === NOUVELLE LOGIQUE AUDIO ===
+    // Génération audio avec ElevenLabs
     if (!finalAudioUrl && elevenLabsApiKey) {
       console.log('🎵 Generating audio with ElevenLabs...');
       
-      // Utiliser la voix fournie ou Josh par défaut
       const selectedVoiceId = voiceId || "TxGEqnHWrfWFTfGW9XjX";
       finalAudioUrl = await generateAudioWithElevenLabs(script, selectedVoiceId);
       
@@ -106,14 +175,14 @@ app.post('/api/render', async (req: Request, res: Response) => {
         console.log('❌ Audio generation failed, continuing without audio');
       }
     }
-    // === FIN NOUVELLE LOGIQUE ===
 
-    // [Le reste de votre code Remotion reste identique...]
+    // Bundling Remotion
     const bundleLocation = await bundle({
       entryPoint: path.join(process.cwd(), 'remotion/index.tsx'),
       webpackOverride: (config) => config,
     });
 
+    // Sélection de la composition
     const composition = await selectComposition({
       serveUrl: bundleLocation,
       id: 'VideoTemplate',
@@ -125,6 +194,7 @@ app.post('/api/render', async (req: Request, res: Response) => {
       },
     });
 
+    // Préparation du dossier de sortie
     const outputDir = path.join(process.cwd(), 'public', 'videos');
     if (!fs.existsSync(outputDir)) {
       fs.mkdirSync(outputDir, { recursive: true });
@@ -135,6 +205,7 @@ app.post('/api/render', async (req: Request, res: Response) => {
 
     console.log('🎬 Rendering video...');
     
+    // Rendu de la vidéo
     await renderMedia({
       composition,
       serveUrl: bundleLocation,
@@ -150,17 +221,27 @@ app.post('/api/render', async (req: Request, res: Response) => {
 
     console.log('✅ Video rendered successfully!');
 
+    // Upload vers Google Drive
+    const { driveLink, driveId } = await uploadToGoogleDrive(
+      outputPath, 
+      `reel_${timestamp}.mp4`
+    );
+
     const videoUrl = `public/videos/video_${timestamp}.mp4`;
     
     const isAbsoluteAudioUrl = finalAudioUrl ? 
       (finalAudioUrl.startsWith('http://') || finalAudioUrl.startsWith('https://')) : 
       false;
     
+    // Réponse avec toutes les infos
     res.json({
       success: true,
       videoUrl: `/${videoUrl}`,
-      audioUrl: finalAudioUrl ? (isAbsoluteAudioUrl ? finalAudioUrl : `/${finalAudioUrl}`) : null,
       videoPath: outputPath,
+      driveLink: driveLink,
+      driveId: driveId,
+      audioUrl: finalAudioUrl ? (isAbsoluteAudioUrl ? finalAudioUrl : `/${finalAudioUrl}`) : null,
+      timestamp: timestamp,
     });
     
   } catch (error) {
@@ -172,14 +253,18 @@ app.post('/api/render', async (req: Request, res: Response) => {
   }
 });
 
+// === HEALTH CHECK ===
 app.get('/health', (req: Request, res: Response) => {
   res.json({ 
     status: 'ok',
     elevenLabsConfigured: !!elevenLabsApiKey,
+    googleDriveConfigured: !!process.env.GOOGLE_CREDENTIALS,
   });
 });
 
+// === DÉMARRAGE SERVEUR ===
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
   console.log(`🎵 ElevenLabs configured: ${!!elevenLabsApiKey}`);
+  console.log(`📁 Google Drive configured: ${!!process.env.GOOGLE_CREDENTIALS}`);
 });
