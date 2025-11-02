@@ -23,7 +23,7 @@ export const Root: React.FC = () => {
         height={1920}
         defaultProps={{
           script: 'This is a sample script for your vertical video. The text will appear as animated captions synced with the audio.',
-          audioUrl: undefined,  // ✅ CHANGÉ: undefined au lieu de 'https://example.com/audio.mp3'
+          audioUrl: '',  // ✅ CORRIGÉ: Chaîne vide au lieu de 'https://example.com/audio.mp3'
           avatarUrl: undefined,
           backgroundUrl: undefined,
         }}
