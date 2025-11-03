@@ -58,7 +58,6 @@ async function generateAudioWithElevenLabs(text: string, voiceId: string = "TxGE
   } catch (error) {
     console.error('❌ ElevenLabs failed:', error);
     
-    // Essayer la voix de secours
     if (voiceId === "TxGEqnHWrfWFTfGW9XjX") {
       console.log('🔄 Trying backup voice: Bella');
       return await generateAudioWithElevenLabs(text, "4RZ84U1b4WCqpu57LvIq");
@@ -74,13 +73,11 @@ async function uploadToGoogleDrive(filePath: string, fileName: string): Promise<
   try {
     console.log('📤 Uploading to Google Drive...');
     
-    // Vérifier si les credentials existent
     if (!process.env.GOOGLE_CREDENTIALS) {
       console.error('❌ GOOGLE_CREDENTIALS not found in environment variables');
       return { driveLink: null, driveId: null };
     }
 
-    // Authentification
     const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
     const auth = new google.auth.GoogleAuth({
       credentials: credentials,
@@ -89,26 +86,22 @@ async function uploadToGoogleDrive(filePath: string, fileName: string): Promise<
 
     const drive = google.drive({ version: 'v3', auth });
 
-    // Métadonnées du fichier
     const fileMetadata = {
       name: fileName,
       mimeType: 'video/mp4',
     };
 
-    // Contenu du fichier
     const media = {
       mimeType: 'video/mp4',
       body: fs.createReadStream(filePath),
     };
 
-    // Upload
     const response = await drive.files.create({
       requestBody: fileMetadata,
       media: media,
       fields: 'id, webViewLink, webContentLink',
     });
 
-    // Rendre le fichier accessible (optionnel)
     if (response.data.id) {
       await drive.permissions.create({
         fileId: response.data.id,
@@ -137,7 +130,14 @@ async function uploadToGoogleDrive(filePath: string, fileName: string): Promise<
   }
 }
 
-// === INTERFACE REQUEST ===
+// === FONCTION NETTOYAGE MÉMOIRE ===
+function cleanupMemory() {
+  if (global.gc) {
+    console.log('🧹 Running garbage collection...');
+    global.gc();
+  }
+}
+
 interface RenderRequest {
   script: string;
   voiceId?: string;
@@ -150,7 +150,6 @@ interface RenderRequest {
   };
 }
 
-// === ENDPOINT PRINCIPAL ===
 app.post('/api/render', async (req: Request, res: Response) => {
   try {
     const { script, voiceId, avatarUrl, backgroundUrl, audioUrl, style }: RenderRequest = req.body;
@@ -162,19 +161,14 @@ app.post('/api/render', async (req: Request, res: Response) => {
 
     let finalAudioUrl: string | null | undefined = audioUrl;
 
-    // Génération audio avec ElevenLabs
+    // Génération audio (désactivée pour économiser RAM)
     if (!finalAudioUrl && elevenLabsApiKey) {
-      console.log('🎵 Generating audio with ElevenLabs...');
-      
-      const selectedVoiceId = voiceId || "TxGEqnHWrfWFTfGW9XjX";
-      finalAudioUrl = await generateAudioWithElevenLabs(script, selectedVoiceId);
-      
-      if (finalAudioUrl) {
-        console.log('✅ Audio generated successfully');
-      } else {
-        console.log('❌ Audio generation failed, continuing without audio');
-      }
+      console.log('⚠️  Audio generation skipped to save RAM');
+      finalAudioUrl = null;
     }
+
+    console.log('🧹 Cleaning memory before render...');
+    cleanupMemory();
 
     // Bundling Remotion
     const bundleLocation = await bundle({
@@ -182,7 +176,6 @@ app.post('/api/render', async (req: Request, res: Response) => {
       webpackOverride: (config) => config,
     });
 
-    // Sélection de la composition
     const composition = await selectComposition({
       serveUrl: bundleLocation,
       id: 'VideoTemplate',
@@ -194,7 +187,6 @@ app.post('/api/render', async (req: Request, res: Response) => {
       },
     });
 
-    // Préparation du dossier de sortie
     const outputDir = path.join(process.cwd(), 'public', 'videos');
     if (!fs.existsSync(outputDir)) {
       fs.mkdirSync(outputDir, { recursive: true });
@@ -203,14 +195,22 @@ app.post('/api/render', async (req: Request, res: Response) => {
     const timestamp = Date.now();
     const outputPath = path.join(outputDir, `video_${timestamp}.mp4`);
 
-    console.log('🎬 Rendering video...');
+    console.log('🎬 Rendering video with optimizations...');
     
-    // Rendu de la vidéo
+    // ⚡ OPTIMISATIONS POUR RENDER GRATUIT
     await renderMedia({
       composition,
       serveUrl: bundleLocation,
       codec: 'h264',
       outputLocation: outputPath,
+      // Optimisations RAM
+      concurrency: 1,              // ✅ 1 seul process au lieu de plusieurs
+      imageFormat: 'jpeg',         // ✅ JPEG consomme moins que PNG
+      scale: 0.75,                 // ✅ Réduire la résolution de 25%
+      crf: 28,                     // ✅ Compression plus forte
+      videoBitrate: '2M',          // ✅ Bitrate réduit
+      pixelFormat: 'yuv420p',
+      enforceAudioTrack: false,    // ✅ Pas de piste audio vide
       inputProps: {
         script,
         audioUrl: finalAudioUrl || undefined,
@@ -220,6 +220,9 @@ app.post('/api/render', async (req: Request, res: Response) => {
     });
 
     console.log('✅ Video rendered successfully!');
+    
+    console.log('🧹 Cleaning memory after render...');
+    cleanupMemory();
 
     // Upload vers Google Drive
     const { driveLink, driveId } = await uploadToGoogleDrive(
@@ -227,13 +230,20 @@ app.post('/api/render', async (req: Request, res: Response) => {
       `reel_${timestamp}.mp4`
     );
 
+    // Nettoyage du fichier local pour libérer espace
+    try {
+      fs.unlinkSync(outputPath);
+      console.log('🗑️  Local file cleaned up');
+    } catch (e) {
+      console.log('⚠️  Could not delete local file');
+    }
+
     const videoUrl = `public/videos/video_${timestamp}.mp4`;
     
     const isAbsoluteAudioUrl = finalAudioUrl ? 
       (finalAudioUrl.startsWith('http://') || finalAudioUrl.startsWith('https://')) : 
       false;
     
-    // Réponse avec toutes les infos
     res.json({
       success: true,
       videoUrl: `/${videoUrl}`,
@@ -246,6 +256,7 @@ app.post('/api/render', async (req: Request, res: Response) => {
     
   } catch (error) {
     console.error('❌ Error rendering video:', error);
+    cleanupMemory();
     res.status(500).json({ 
       error: 'Failed to render video', 
       details: error instanceof Error ? error.message : 'Unknown error'
@@ -253,7 +264,6 @@ app.post('/api/render', async (req: Request, res: Response) => {
   }
 });
 
-// === HEALTH CHECK ===
 app.get('/health', (req: Request, res: Response) => {
   res.json({ 
     status: 'ok',
@@ -262,9 +272,9 @@ app.get('/health', (req: Request, res: Response) => {
   });
 });
 
-// === DÉMARRAGE SERVEUR ===
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
   console.log(`🎵 ElevenLabs configured: ${!!elevenLabsApiKey}`);
   console.log(`📁 Google Drive configured: ${!!process.env.GOOGLE_CREDENTIALS}`);
+  console.log(`⚡ Optimizations enabled for 512MB RAM`);
 });
