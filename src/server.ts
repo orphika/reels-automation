@@ -207,8 +207,7 @@ app.post('/api/render', async (req: Request, res: Response) => {
       concurrency: 1,              // ✅ 1 seul process au lieu de plusieurs
       imageFormat: 'jpeg',         // ✅ JPEG consomme moins que PNG
       scale: 0.75,                 // ✅ Réduire la résolution de 25%
-      crf: 28,                     // ✅ Compression plus forte
-      videoBitrate: '2M',          // ✅ Bitrate réduit
+      crf: 28,                     // ✅ Compression (18=haute, 28=moyenne, 32=basse)
       pixelFormat: 'yuv420p',
       enforceAudioTrack: false,    // ✅ Pas de piste audio vide
       inputProps: {
