@@ -17,13 +17,13 @@ export const Root: React.FC = () => {
       <Composition
         id="VideoTemplate"
         component={VideoTemplate}
-        durationInFrames={1800}
+        durationInFrames={300}  // ✅ CHANGÉ: 10 secondes au lieu de 60
         fps={30}
         width={1080}
         height={1920}
         defaultProps={{
           script: 'This is a sample script for your vertical video. The text will appear as animated captions synced with the audio.',
-          audioUrl: '',  // ✅ CORRIGÉ: Chaîne vide au lieu de 'https://example.com/audio.mp3'
+          audioUrl: '',
           avatarUrl: undefined,
           backgroundUrl: undefined,
         }}
