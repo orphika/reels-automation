@@ -69,12 +69,22 @@ async function generateAudioWithElevenLabs(text: string, voiceId: string = "TxGE
 }
 
 // === FONCTION UPLOAD GOOGLE DRIVE ===
-async function uploadToGoogleDrive(filePath: string, fileName: string): Promise<{ driveLink: string | null; driveId: string | null }> {
+async function uploadToGoogleDrive(
+  filePath: string, 
+  fileName: string, 
+  folderId?: string
+): Promise<{ driveLink: string | null; driveId: string | null }> {
   try {
     console.log('📤 Uploading to Google Drive...');
+    console.log(`📁 Target folder ID: ${folderId || 'NONE (will fail!)'}`);
     
     if (!process.env.GOOGLE_CREDENTIALS) {
       console.error('❌ GOOGLE_CREDENTIALS not found in environment variables');
+      return { driveLink: null, driveId: null };
+    }
+
+    if (!folderId) {
+      console.error('❌ No folderId provided! Service Accounts require a parent folder.');
       return { driveLink: null, driveId: null };
     }
 
@@ -86,10 +96,16 @@ async function uploadToGoogleDrive(filePath: string, fileName: string): Promise<
 
     const drive = google.drive({ version: 'v3', auth });
 
-    const fileMetadata = {
+    const fileMetadata: any = {
       name: fileName,
       mimeType: 'video/mp4',
     };
+
+    // Ajouter le dossier parent si fourni
+    if (folderId) {
+      fileMetadata.parents = [folderId];
+      console.log(`📁 Uploading to folder: ${folderId}`);
+    }
 
     const media = {
       mimeType: 'video/mp4',
@@ -144,6 +160,7 @@ interface RenderRequest {
   avatarUrl?: string;
   backgroundUrl?: string;
   audioUrl?: string;
+  folderId?: string;  // ID du dossier Drive (morning, evening, tiktok)
   style?: {
     backgroundColor?: string;
     fontColor?: string;
@@ -152,12 +169,24 @@ interface RenderRequest {
 
 app.post('/api/render', async (req: Request, res: Response) => {
   try {
-    const { script, voiceId, avatarUrl, backgroundUrl, audioUrl, style }: RenderRequest = req.body;
+    const { script, voiceId, avatarUrl, backgroundUrl, audioUrl, folderId, style }: RenderRequest = req.body;
+
+    console.log('📥 Request received:', {
+      hasScript: !!script,
+      hasFolderId: !!folderId,
+      folderId: folderId,
+      bodyKeys: Object.keys(req.body)
+    });
 
     if (!script) {
       res.status(400).json({ error: 'Script is required' });
       return;
     }
+
+    // Dossier par défaut OBLIGATOIRE (Service Account n'a pas de Drive)
+    const targetFolderId = folderId || process.env.DRIVE_DEFAULT_FOLDER || "1K9OwJQVrZj4o--KmDAvyW2qVKtxdgpiw";
+    
+    console.log(`📁 Using folder ID: ${targetFolderId}${folderId ? ' (from request)' : ' (default)'}`);
 
     let finalAudioUrl: string | null | undefined = audioUrl;
 
@@ -223,10 +252,12 @@ app.post('/api/render', async (req: Request, res: Response) => {
     console.log('🧹 Cleaning memory after render...');
     cleanupMemory();
 
-    // Upload vers Google Drive
+    // Upload vers Google Drive (TOUJOURS avec un dossier)
+    console.log(`📤 Starting Drive upload with folder: ${targetFolderId}`);
     const { driveLink, driveId } = await uploadToGoogleDrive(
       outputPath, 
-      `reel_${timestamp}.mp4`
+      `reel_${timestamp}.mp4`,
+      targetFolderId  // TOUJOURS fourni (par défaut = morning)
     );
 
     // Nettoyage du fichier local APRÈS upload pour libérer espace
