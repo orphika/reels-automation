@@ -229,10 +229,14 @@ app.post('/api/render', async (req: Request, res: Response) => {
       `reel_${timestamp}.mp4`
     );
 
-    // Nettoyage du fichier local pour libérer espace
+    // Nettoyage du fichier local APRÈS upload pour libérer espace
     try {
-      fs.unlinkSync(outputPath);
-      console.log('🗑️  Local file cleaned up');
+      if (driveLink) {
+        fs.unlinkSync(outputPath);
+        console.log('🗑️  Local file cleaned up');
+      } else {
+        console.log('⚠️  Keeping local file (upload failed)');
+      }
     } catch (e) {
       console.log('⚠️  Could not delete local file');
     }
